@@ -1,0 +1,28 @@
+config {
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "transaction count"
+}
+
+WITH months AS (
+  SELECT 
+    DATE_ADD(DATE '2020-08-31', INTERVAL x MONTH) AS month_end
+  FROM 
+    UNNEST(GENERATE_ARRAY(0, 53)) AS x
+)
+
+SELECT 
+  m.month_end,                         
+  COALESCE(COUNT(CASE WHEN t.transaction_type = 'Buy' THEN 1 END), 0) AS buy_count,
+  COALESCE(COUNT(CASE WHEN t.transaction_type = 'Sell' THEN 1 END), 0) AS sell_count,
+  COALESCE(SUM(t.fees), 0) + COALESCE(SUM(CASE WHEN t.transaction_type = 'Fee' THEN t.transacted_value END), 0) AS total_fee
+FROM 
+  months m
+LEFT JOIN 
+  `jy-investment-portfolio.Transaction_List.transaction list myr` t
+  ON LAST_DAY(t.transaction_date) = m.month_end       
+GROUP BY 
+  m.month_end
+ORDER BY 
+  m.month_end
+

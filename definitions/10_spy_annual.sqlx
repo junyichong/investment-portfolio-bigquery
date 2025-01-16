@@ -1,0 +1,69 @@
+config {
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "spy annual",
+  dependencies: ["spy monthly"]
+}
+
+WITH months AS (
+  SELECT 
+    DATE_ADD(DATE '2020-08-31', INTERVAL x MONTH) AS month_end
+  FROM UNNEST(GENERATE_ARRAY(0, 53)) AS x
+),
+years AS (
+  SELECT 
+    DATE_ADD(DATE '2019-12-31', INTERVAL x YEAR) AS year_end
+  FROM UNNEST(GENERATE_ARRAY(0, 6)) AS x
+),
+
+monthly_data AS (
+  SELECT 
+    month_end,
+    EXTRACT(YEAR FROM month_end) AS year,
+    cumulative_cost,
+    unrealized_gain_loss,
+    market_value,
+    gain_loss_this_month_percent,
+    ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM month_end) ORDER BY month_end DESC) AS row_num
+  FROM 
+    `jy-investment-portfolio.Investment_Portfolio.spy monthly`
+),
+
+annual_data AS (
+  SELECT
+    year,
+    MAX(CASE WHEN row_num = 1 THEN unrealized_gain_loss END) AS annual_total_gain_loss,
+    MAX(CASE WHEN row_num = 1 THEN market_value END) AS annual_market_value
+  FROM monthly_data
+  GROUP BY 
+    year
+  ORDER BY 
+    year
+),
+annual_return AS (
+  SELECT 
+    year,
+    EXP(SUM(LOG(1 + gain_loss_this_month_percent))) - 1 AS annual_return_percent,
+  FROM 
+    monthly_data
+  GROUP BY 
+    year
+  ORDER BY 
+    year
+)
+
+SELECT
+  md.year,
+  md.month_end,
+  md.market_value,
+  md.gain_loss_this_month_percent,
+  ar.annual_return_percent,
+  ad.annual_total_gain_loss,
+  ad.annual_market_value
+FROM monthly_data md
+
+LEFT JOIN annual_data ad
+  ON md.year = ad.year
+LEFT JOIN annual_return ar
+  ON md.year = ar.year
+ORDER BY md.month_end
