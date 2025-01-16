@@ -1,0 +1,94 @@
+config {
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "monthly portfolio data",
+  dependencies: ["monthly holdings data myr"]
+}
+
+WITH months AS (
+  SELECT 
+    DATE_ADD(DATE '2020-08-31', INTERVAL x MONTH) AS month_end
+  FROM UNNEST(GENERATE_ARRAY(0, 53)) AS x
+),
+
+total_investments AS (
+  SELECT 
+    m.month_end,
+    t.account,
+    # t.unique_currency,
+    SUM(CASE 
+          WHEN t.transaction_type = 'Deposit' THEN t.transacted_price 
+          WHEN t.transaction_type = 'Withdraw' THEN -t.transacted_price 
+          ELSE 0 
+        END) 
+        OVER (
+        PARTITION BY t.account, m.month_end) AS total_invested,
+    ROW_NUMBER() OVER (PARTITION BY m.month_end, t.account ORDER BY t.transaction_id DESC) AS row_num
+  FROM 
+    `jy-investment-portfolio.Transaction_List.transaction list myr` t
+  JOIN months m
+    ON t.transaction_date <= m.month_end
+),
+monthly_investments AS (
+  SELECT
+    month_end,
+    account,
+    IFNULL(total_invested - IFNULL(LAG(total_invested) OVER (
+        PARTITION BY account
+        ORDER BY month_end
+    ), 0), 0) AS amount_invested,
+  FROM total_investments t
+  WHERE row_num = 1
+),
+monthly_data AS (
+  SELECT 
+    month_end,
+    account,
+    SUM(market_value_myr) AS market_value,
+    SUM(cumulative_cost_myr) AS cost,
+    SUM(unrealized_gain_loss_this_month) AS unrealized_gain_loss,
+    SUM(currency_gain_loss_this_month) AS currency_gain_loss,
+    SUM(dividend_this_month) AS dividend,
+    SUM(realized_gain_loss_this_month) AS realized_gain_loss,
+  FROM 
+    `jy-investment-portfolio.Investment_Portfolio.monthly holdings data myr`
+  GROUP BY 
+    month_end, account
+  ORDER BY 
+    month_end, account
+),
+main AS (
+SELECT
+  ti.month_end,
+  ti.account,
+  mi.amount_invested,
+  ti.total_invested,
+  IFNULL(mi.amount_invested + IFNULL(LAG(md.market_value) OVER (
+        PARTITION BY ti.account
+        ORDER BY ti.month_end
+    ), 0), 0) AS cost_this_month,
+  md.market_value,
+  md.market_value - ti.total_invested AS total_gain_loss,
+  md.cost,
+  md.unrealized_gain_loss,
+  md.currency_gain_loss,
+  md.dividend,
+  md.realized_gain_loss,
+  md.unrealized_gain_loss + md.currency_gain_loss + md.dividend + md.realized_gain_loss AS gain_loss_this_month,
+FROM total_investments ti
+LEFT JOIN monthly_investments mi
+  ON ti.month_end = mi.month_end
+  AND ti.account = mi.account
+LEFT JOIN monthly_data md
+  ON ti.month_end = md.month_end
+  AND ti.account = md.account
+WHERE ti.row_num = 1 -- AND ti.account = "IBKR"
+ORDER BY month_end
+)
+
+SELECT *,
+  IF(cost_this_month = 0, 0, gain_loss_this_month / cost_this_month) AS gain_loss_this_month_percent,
+  IF(cost_this_month = 0, 0, (gain_loss_this_month-currency_gain_loss) / cost_this_month) AS gain_loss_this_month_percent_fxn
+FROM main m
+ORDER BY month_end
+

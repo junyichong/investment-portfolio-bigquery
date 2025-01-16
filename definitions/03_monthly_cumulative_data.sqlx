@@ -1,0 +1,27 @@
+config {
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "monthly cumulative data",
+  dependencies: ["monthly stock data", "monthly cash flow"]
+}
+
+
+WITH monthly_data AS (
+  SELECT * FROM `jy-investment-portfolio.Investment_Portfolio.monthly stock data`
+  UNION ALL
+  SELECT * FROM `jy-investment-portfolio.Investment_Portfolio.monthly cash flow`
+  ORDER BY month_end ASC, ticker
+),
+ticker_data AS (
+  SELECT * FROM `jy-investment-portfolio.Transaction_List.ticker list`
+)
+
+SELECT
+    m.*,  -- Select all columns from monthly_data
+    t.region, t.country, t.category, t.name, t.sector1, t.sector1_percent, t.sector2, t.sector2_percent, t.sector3, t.sector3_percent
+FROM
+    monthly_data m
+JOIN
+    ticker_data t ON m.ticker = t.ticker  -- Join on ticker
+ORDER BY 
+    m.month_end ASC, m.ticker

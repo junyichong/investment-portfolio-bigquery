@@ -1,0 +1,72 @@
+config {
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "category breakdown",
+  dependencies: ["monthly cumulative data"]
+}
+
+WITH sector1 AS (
+  SELECT 
+  month_end,
+  unique_ticker,
+  market_value_myr,
+  sector1 AS sector,
+  sector1_percent * market_value_myr AS sector_market_value
+  FROM `jy-investment-portfolio.Investment_Portfolio.monthly cumulative data`
+  WHERE sector1_percent IS NOT NULL AND market_value_myr > 0
+),
+sector2 AS (
+  SELECT 
+  month_end,
+  unique_ticker,
+  market_value_myr,
+  sector2 AS sector,
+  sector2_percent * market_value_myr AS sector_market_value
+  FROM `jy-investment-portfolio.Investment_Portfolio.monthly cumulative data`
+  WHERE sector2_percent IS NOT NULL AND market_value_myr > 0
+),
+sector3 AS (
+  SELECT 
+  month_end,
+  unique_ticker,
+  market_value_myr,
+  sector3 AS sector,
+  sector3_percent * market_value_myr AS sector_market_value
+  FROM `jy-investment-portfolio.Investment_Portfolio.monthly cumulative data`
+  WHERE sector3_percent IS NOT NULL AND market_value_myr > 0
+),
+sector AS (
+  SELECT *
+  FROM sector1
+
+  UNION ALL
+
+  SELECT *
+  FROM sector2
+
+  UNION ALL
+
+  SELECT *
+  FROM sector3
+)
+
+SELECT 
+  t.month_end,
+  t.account,
+  t.ticker,
+  t.unique_ticker,
+  t.market_value_myr,
+  t.region,
+  t.country,
+  t.category,
+  s.sector,
+  s.sector_market_value
+
+FROM `jy-investment-portfolio.Investment_Portfolio.monthly cumulative data` t
+
+
+JOIN sector s
+ON t.unique_ticker = s.unique_ticker
+AND t.month_end = s.month_end
+
+ORDER BY month_end, unique_ticker

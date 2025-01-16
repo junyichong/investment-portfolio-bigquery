@@ -1,0 +1,134 @@
+config {
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "monthly cash flow",
+}
+
+WITH months AS (
+  SELECT 
+    DATE_ADD(DATE '2020-08-31', INTERVAL x MONTH) AS month_end
+  FROM UNNEST(GENERATE_ARRAY(0, 53)) AS x
+),
+latest_data AS (
+  SELECT
+    t.account, t.currency, t.unique_currency, t.cumulative_cash_flow,
+    m.month_end,
+    ROW_NUMBER() OVER (PARTITION BY m.month_end, t.unique_currency ORDER BY t.transaction_id DESC) AS row_num
+  FROM `jy-investment-portfolio.Transaction_List.transaction list` t
+  JOIN months m
+        ON t.transaction_date <= m.month_end
+  -- WHERE t.currency IN ("USD", "MYR", "HKD")
+),
+dividend_data AS (
+  SELECT 
+    m.month_end,
+    t.unique_ticker,
+    SUM(CASE WHEN t.transaction_type = 'Dividend' THEN t.gain_loss ELSE 0 END) AS cumulative_dividend
+  FROM `jy-investment-portfolio.Transaction_List.transaction list` t
+  JOIN months m
+    ON t.transaction_date <= m.month_end
+  GROUP BY m.month_end, t.unique_ticker
+),
+gain_loss_data AS (
+  SELECT 
+    m.month_end,
+    t.unique_ticker,
+    SUM(CASE 
+          WHEN t.transaction_type IN ('Deposit', 'Withdraw') THEN t.gain_loss 
+          ELSE 0 
+        END) AS cumulative_gain_loss
+  FROM `jy-investment-portfolio.Transaction_List.transaction list` t
+  JOIN months m
+    ON t.transaction_date <= m.month_end
+  GROUP BY m.month_end, t.unique_ticker
+),
+latest_data_myr AS (
+  SELECT
+    t.account, t.currency, t.unique_currency, t.cumulative_cash_flow,
+    m.month_end,
+    ROW_NUMBER() OVER (PARTITION BY m.month_end, t.unique_currency ORDER BY t.transaction_id DESC) AS row_num
+  FROM `jy-investment-portfolio.Transaction_List.transaction list myr` t
+  JOIN months m
+        ON t.transaction_date <= m.month_end
+  # WHERE t.currency IN ("USD", "MYR", "HKD")
+),
+dividend_data_myr AS (
+  SELECT 
+    m.month_end,
+    t.unique_ticker,
+    SUM(CASE WHEN t.transaction_type = 'Dividend' THEN t.gain_loss ELSE 0 END) AS cumulative_dividend
+  FROM `jy-investment-portfolio.Transaction_List.transaction list myr` t
+  JOIN months m
+    ON t.transaction_date <= m.month_end
+  GROUP BY m.month_end, t.unique_ticker
+),
+gain_loss_data_myr AS (
+  SELECT 
+    m.month_end,
+    t.unique_ticker,
+    SUM(CASE 
+          WHEN t.transaction_type IN ('Deposit', 'Withdraw') THEN t.gain_loss 
+          ELSE 0 
+        END) AS cumulative_gain_loss
+  FROM `jy-investment-portfolio.Transaction_List.transaction list myr` t
+  JOIN months m
+    ON t.transaction_date <= m.month_end
+  GROUP BY m.month_end, t.unique_ticker
+),
+to_myr AS (
+  SELECT 
+    ticker,
+    PARSE_DATE('%Y%m%d', REPLACE(month_end, '_', '')) AS month_end,
+    price
+  FROM 
+    `jy-investment-portfolio.Transaction_List.price history`
+  UNPIVOT(
+    price FOR month_end IN (_20200831, _20200930, _20201031, _20201130, _20201231, _20210131, _20210228, _20210331, _20210430, _20210531, _20210630, _20210731, _20210831, _20210930, _20211031, _20211130, _20211231, _20220131, _20220228, _20220331, _20220430, _20220531, _20220630, _20220731, _20220831, _20220930, _20221031, _20221130, _20221231, _20230131, _20230228, _20230331, _20230430, _20230531, _20230630, _20230731, _20230831, _20230930, _20231031, _20231130, _20231231, _20240131, _20240229, _20240331, _20240430, _20240531, _20240630, _20240731, _20240831, _20240930, _20241031, _20241130, _20241231, _20250131
+    )
+  )
+  WHERE ticker IN ("USD", "HKD", "MYR")
+)
+
+SELECT 
+  ld.month_end,
+  ld.account,
+  ld.currency AS ticker,
+  ld.unique_currency AS unique_ticker,
+  myr.price,
+  ld.cumulative_cash_flow AS cumulative_units,
+  ld.cumulative_cash_flow as cumulative_cost,
+  myr.price AS cost_per_unit,
+  0 AS unrealized_gain_loss,
+  COALESCE(dd.cumulative_dividend, 0) AS cumulative_dividend,
+  COALESCE(gl.cumulative_gain_loss, 0) AS cumulative_gain_loss,
+  ld.cumulative_cash_flow AS market_value,
+
+  ldm.cumulative_cash_flow AS cumulative_cost_myr,
+  0 AS unrealized_gain_loss_myr,
+  myr.price * ld.cumulative_cash_flow - ldm.cumulative_cash_flow AS currency_gain_loss,
+  COALESCE(ddm.cumulative_dividend, 0) AS cumulative_dividend_myr,
+  COALESCE(glm.cumulative_gain_loss, 0) AS cumulative_gain_loss_myr,
+  myr.price * ld.cumulative_cash_flow  AS market_value_myr
+FROM latest_data ld
+
+LEFT JOIN latest_data_myr ldm 
+  ON ld.unique_currency = ldm.unique_currency
+  AND ld.month_end = ldm.month_end
+LEFT JOIN dividend_data dd 
+  ON ld.unique_currency = dd.unique_ticker 
+  AND ld.month_end = dd.month_end
+LEFT JOIN gain_loss_data gl 
+  ON ld.unique_currency = gl.unique_ticker 
+  AND ld.month_end = gl.month_end
+LEFT JOIN dividend_data_myr ddm 
+  ON ld.unique_currency = ddm.unique_ticker 
+  AND ld.month_end = ddm.month_end
+LEFT JOIN gain_loss_data_myr glm 
+  ON ld.unique_currency = glm.unique_ticker 
+  AND ld.month_end = glm.month_end
+LEFT JOIN to_myr myr
+  ON ld.month_end = myr.month_end
+  AND ld.currency = myr.ticker
+
+WHERE ld.row_num = 1 AND ldm.row_num =1 -- AND ld.account = "Ledger" # AND ld.unique_currency IN ("Webull MY: USD")
+ORDER BY ld.month_end ASC, ld.unique_currency

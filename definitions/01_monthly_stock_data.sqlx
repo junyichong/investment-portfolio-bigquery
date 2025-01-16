@@ -1,7 +1,7 @@
 config {
   type: "table",
   schema: "Investment_Portfolio",
-  name: "my_table"
+  name: "monthly stock data"
 }
 
 WITH months AS (
@@ -144,5 +144,5 @@ LEFT JOIN to_myr myr
   ON ld.month_end = myr.month_end
   AND ld.currency = myr.ticker
 
-WHERE ld.row_num = 1 AND ldm.row_num =1 # AND ld.account = "Ledger" # AND ld.unique_ticker IN ("IBKR: BABA", "Webull: BABA")
+WHERE ld.row_num = 1 AND ldm.row_num =1 -- AND ld.account = "Ledger" # AND ld.unique_ticker IN ("IBKR: BABA", "Webull: BABA")
 ORDER BY ld.month_end ASC, ld.unique_ticker

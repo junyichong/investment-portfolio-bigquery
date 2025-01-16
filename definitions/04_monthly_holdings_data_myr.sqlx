@@ -1,0 +1,48 @@
+config {
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "monthly holdings data myr",
+  dependencies: ["monthly cumulative data"]
+}
+
+SELECT
+    month_end,
+    account,
+    ticker,
+    cumulative_cost_myr,
+    cost_per_unit,
+    price,
+
+    unrealized_gain_loss_myr,
+    IFNULL(unrealized_gain_loss_myr - IFNULL(LAG(unrealized_gain_loss_myr) OVER (
+        PARTITION BY unique_ticker
+        ORDER BY month_end
+    ), 0), 0) AS unrealized_gain_loss_this_month,
+
+    currency_gain_loss,
+    -- Monthly Currency Gain/Loss Sum by Account
+    IFNULL(currency_gain_loss - IFNULL(LAG(currency_gain_loss) OVER (
+        PARTITION BY unique_ticker
+        ORDER BY month_end
+    ),0), 0) AS currency_gain_loss_this_month,
+
+    cumulative_dividend_myr AS dividend,
+    -- Monthly Dividend Sum by Account
+    IFNULL(cumulative_dividend_myr - IFNULL(LAG(cumulative_dividend_myr) OVER (
+        PARTITION BY unique_ticker
+        ORDER BY month_end
+    ), 0), 0) AS dividend_this_month,
+    
+    cumulative_gain_loss_myr AS realized_gain_loss,
+    -- Monthly Gain/Loss Sum by Account
+    IFNULL(cumulative_gain_loss_myr - IFNULL(LAG(cumulative_gain_loss_myr) OVER (
+        PARTITION BY unique_ticker
+        ORDER BY month_end
+    ), 0), 0) AS realized_gain_loss_this_month,
+
+    market_value_myr
+    FROM
+    `jy-investment-portfolio.Investment_Portfolio.monthly cumulative data`
+
+    -- WHERE ticker = "BABA"
+    ORDER BY month_end ASC, account, ticker

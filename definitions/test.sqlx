@@ -1,8 +1,0 @@
-config {
-  type: "table",
-  schema: "Investment_Portfolio",
-  name: "test"
-}
-
-SELECT *
-FROM `jy-investment-portfolio.Transaction_List.transaction list` t

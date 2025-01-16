@@ -1,0 +1,109 @@
+config {
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "monthly total portfolio data",
+  dependencies: ["monthly portfolio data"]
+}
+
+WITH months AS (
+  SELECT 
+    DATE_ADD(DATE '2020-08-31', INTERVAL x MONTH) AS month_end
+  FROM UNNEST(GENERATE_ARRAY(0, 53)) AS x
+),
+years AS (
+  SELECT 
+    DATE_ADD(DATE '2019-12-31', INTERVAL x YEAR) AS year_end
+  FROM UNNEST(GENERATE_ARRAY(0, 6)) AS x
+),
+
+monthly_data AS (
+  SELECT 
+    month_end,
+    EXTRACT(YEAR FROM month_end) AS year,
+    SUM(amount_invested) AS amount_invested,
+    SUM(total_invested) AS total_invested,
+    SUM(cost_this_month) AS cost_this_month,
+    SUM(market_value) AS market_value,
+    SUM(total_gain_loss) AS total_gain_loss,
+    SUM(cost) AS cost,
+    SUM(unrealized_gain_loss) AS unrealized_gain_loss,
+    SUM(currency_gain_loss) AS currency_gain_loss,
+    SUM(dividend) AS dividend,
+    SUM(realized_gain_loss) AS realized_gain_loss,
+    SUM(gain_loss_this_month) AS gain_loss_this_month,
+    ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM month_end) ORDER BY month_end DESC) AS row_num
+  FROM 
+    `jy-investment-portfolio.Investment_Portfolio.monthly portfolio data`
+  GROUP BY 
+    month_end
+  ORDER BY 
+    month_end
+),
+
+annual_data AS (
+  SELECT
+    year,
+    MAX(CASE WHEN row_num = 1 THEN total_invested END) AS annual_total_invested,
+    MAX(CASE WHEN row_num = 1 THEN total_gain_loss END) AS annual_total_gain_loss,
+    MAX(CASE WHEN row_num = 1 THEN market_value END) AS annual_market_value
+  FROM monthly_data
+  GROUP BY 
+    year
+  ORDER BY 
+    year
+),
+
+monthly_return AS (
+  SELECT
+    month_end,
+    EXTRACT(YEAR FROM month_end) AS year,
+    IF(cost_this_month = 0, 0, gain_loss_this_month / cost_this_month) AS gain_loss_this_month_percent,
+    IF(cost_this_month = 0, 0, (gain_loss_this_month-currency_gain_loss) / cost_this_month) AS gain_loss_this_month_percent_fxn
+  FROM
+    monthly_data
+  ORDER BY month_end
+),
+
+annual_return AS (
+  SELECT 
+    year,
+    EXP(SUM(LOG(1 + gain_loss_this_month_percent))) - 1 AS annual_return_percent,
+    EXP(SUM(LOG(1 + gain_loss_this_month_percent_fxn))) - 1 AS annual_return_percent_fxn
+  FROM 
+    monthly_return
+  GROUP BY 
+    year
+  ORDER BY 
+    year
+)
+
+SELECT
+  mr.year,
+  md.month_end,
+  md.amount_invested,
+  md.total_invested,
+  md.cost_this_month,
+  md.market_value,
+  md.total_gain_loss,
+  md.cost,
+  md.unrealized_gain_loss,
+  md.currency_gain_loss,
+  md.dividend,
+  md.realized_gain_loss,
+  md.gain_loss_this_month,
+  mr.gain_loss_this_month_percent,
+  mr.gain_loss_this_month_percent_fxn,
+  ar.annual_return_percent,
+  ar.annual_return_percent_fxn,
+  ad.annual_total_invested,
+  ad.annual_total_gain_loss,
+  ad.annual_market_value
+FROM monthly_data md
+
+LEFT JOIN monthly_return mr
+  ON md.month_end = mr.month_end
+LEFT JOIN annual_data ad
+  ON mr.year = ad.year
+LEFT JOIN annual_return ar
+  ON mr.year = ar.year
+ORDER BY md.month_end
