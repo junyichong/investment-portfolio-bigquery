@@ -1,0 +1,20 @@
+config {
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "currency report",
+  dependencies: ["price history", "monthly total portfolio data"]
+}
+
+SELECT 
+    ph.month_end,
+    ph.ticker,
+    ph.price,
+    pd.currency_gain_loss
+FROM `jy-investment-portfolio.Investment_Portfolio.price history`
+WHERE ticker = "USD"
+
+JOIN `jy-investment-portfolio.Investment_Portfolio.monthly total portfolio data` pd
+ON ph.month_end = pd.month_end
+
+
+
