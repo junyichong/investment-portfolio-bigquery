@@ -2,12 +2,13 @@ config {
   type: "table",
   schema: "Investment_Portfolio",
   name: "monthly cash flow",
+  dependencies: ["price history"]
 }
 
 WITH months AS (
   SELECT 
-    DATE_ADD(DATE '2020-08-31', INTERVAL x MONTH) AS month_end
-  FROM UNNEST(GENERATE_ARRAY(0, 57)) AS x
+    month_end
+  FROM `jy-investment-portfolio.Investment_Portfolio.price history`
 ),
 latest_data AS (
   SELECT
@@ -78,23 +79,9 @@ gain_loss_data_myr AS (
 to_myr AS (
   SELECT 
     ticker,
-    PARSE_DATE('%Y%m%d', REPLACE(month_end, '_', '')) AS month_end,
+    month_end,
     price
-  FROM 
-    `jy-investment-portfolio.Transaction_List.price history`
-  UNPIVOT(
-    price FOR month_end IN (_20200930, _20201031, _20201130, 
-    _20201231, _20210131, _20210228, _20210331, _20210430, _20210531, 
-    _20210630, _20210731, _20210831, _20210930, _20211031, _20211130, 
-    _20211231, _20220131, _20220228, _20220331, _20220430, _20220531, 
-    _20220630, _20220731, _20220831, _20220930, _20221031, _20221130, 
-    _20221231, _20230131, _20230228, _20230331, _20230430, _20230531, 
-    _20230630, _20230731, _20230831, _20230930, _20231031, _20231130, 
-    _20231231, _20240131, _20240229, _20240331, _20240430, _20240531, 
-    _20240630, _20240731, _20240831, _20240930, _20241031, _20241130, 
-    _20241231, _20250131, _20250228, _20250331, _20250430, _20250531
-    )
-  )
+  FROM `jy-investment-portfolio.Investment_Portfolio.price history`
   WHERE ticker IN ("USD", "HKD", "MYR")
 )
 
