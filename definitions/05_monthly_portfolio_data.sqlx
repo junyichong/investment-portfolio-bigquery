@@ -10,7 +10,6 @@ WITH months AS (
     DATE_ADD(DATE '2020-08-31', INTERVAL x MONTH) AS month_end
   FROM UNNEST(GENERATE_ARRAY(0, 57)) AS x
 ),
-
 total_investments AS (
   SELECT 
     m.month_end,

@@ -10,7 +10,6 @@ WITH months AS (
     month_end
   FROM `jy-investment-portfolio.Investment_Portfolio.price history`
 ),
-
 monthly_data AS (
   SELECT 
     month_end,
@@ -34,7 +33,6 @@ monthly_data AS (
   ORDER BY 
     month_end
 ),
-
 annual_data AS (
   SELECT
     year,
@@ -47,7 +45,6 @@ annual_data AS (
   ORDER BY 
     year
 ),
-
 monthly_return AS (
   SELECT
     month_end,
@@ -58,7 +55,6 @@ monthly_return AS (
     monthly_data
   ORDER BY month_end
 ),
-
 annual_return AS (
   SELECT 
     year,
