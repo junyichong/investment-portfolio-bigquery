@@ -7,15 +7,9 @@ config {
 
 WITH months AS (
   SELECT 
-    DATE_ADD(DATE '2020-08-31', INTERVAL x MONTH) AS month_end
-  FROM UNNEST(GENERATE_ARRAY(0, 57)) AS x
+    month_end
+  FROM `jy-investment-portfolio.Investment_Portfolio.price history`
 ),
-years AS (
-  SELECT 
-    DATE_ADD(DATE '2019-12-31', INTERVAL x YEAR) AS year_end
-  FROM UNNEST(GENERATE_ARRAY(0, 6)) AS x
-),
-
 monthly_data AS (
   SELECT 
     month_end,
@@ -28,7 +22,6 @@ monthly_data AS (
   FROM 
     `jy-investment-portfolio.Investment_Portfolio.spy monthly`
 ),
-
 annual_data AS (
   SELECT
     year,
