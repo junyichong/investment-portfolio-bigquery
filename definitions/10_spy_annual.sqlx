@@ -7,7 +7,7 @@ config {
 
 WITH months AS (
   SELECT 
-    month_end
+    DISTINCT(month_end) AS month_end
   FROM `jy-investment-portfolio.Investment_Portfolio.price history`
 ),
 monthly_data AS (

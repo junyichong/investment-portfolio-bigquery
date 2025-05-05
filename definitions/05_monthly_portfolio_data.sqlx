@@ -7,8 +7,8 @@ config {
 
 WITH months AS (
   SELECT 
-    DATE_ADD(DATE '2020-08-31', INTERVAL x MONTH) AS month_end
-  FROM UNNEST(GENERATE_ARRAY(0, 57)) AS x
+    DISTINCT(month_end) AS month_end
+  FROM `jy-investment-portfolio.Investment_Portfolio.price history`
 ),
 total_investments AS (
   SELECT 

@@ -7,7 +7,7 @@ config {
 
 WITH months AS (
   SELECT 
-    month_end
+    DISTINCT(month_end) AS month_end
   FROM `jy-investment-portfolio.Investment_Portfolio.price history`
 ),
 monthly_data AS (
@@ -58,8 +58,8 @@ monthly_return AS (
 annual_return AS (
   SELECT 
     year,
-    EXP(SUM(LOG(1 + gain_loss_this_month_percent))) - 1 AS annual_return_percent,
-    EXP(SUM(LOG(1 + gain_loss_this_month_percent_fxn))) - 1 AS annual_return_percent_fxn
+     EXP(SUM(LOG(1 + gain_loss_this_month_percent))) - 1 AS annual_return_percent,
+     EXP(SUM(LOG(1 + gain_loss_this_month_percent_fxn))) - 1 AS annual_return_percent_fxn
   FROM 
     monthly_return
   GROUP BY 
