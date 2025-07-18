@@ -115,9 +115,9 @@ SELECT
       (POW((1 + ld.unrealized_percent_fxn), (365.25/CAST(hp.holding_period_days AS FLOAT64))) - 1)
   END AS cagr_percent
 FROM
-  HoldingPeriod hp
-JOIN 
   LatestData ld
-ON hp.ticker = ld.ticker
+LEFT JOIN 
+  HoldingPeriod hp
+ON ld.ticker = hp.ticker
 ORDER BY
   ld.market_value_myr DESC, ld.realized_gain_loss DESC
