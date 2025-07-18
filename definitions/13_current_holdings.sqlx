@@ -1,0 +1,123 @@
+config {
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "current holdings",
+  dependencies: ["holding period", "monthly holdings data myr"]
+}
+
+WITH
+  -- This CTE combines both ranking rules to select the single most relevant holding period per ticker.
+  HoldingPeriod AS (
+    SELECT
+      unique_ticker,
+      ticker,
+      holding_period_group,
+      effective_first_purchase_date,
+      last_transaction_date_in_group,
+      cumulative_units_at_group_end,
+      holding_period_days,
+      status
+    FROM
+      (
+        -- Inner subquery: First, rank by holding_period_group for each unique_ticker.
+        -- This addresses rule #1: "if there are multiple group, take the higher number group"
+        SELECT
+          unique_ticker,
+          ticker,
+          holding_period_group,
+          effective_first_purchase_date,
+          last_transaction_date_in_group,
+          cumulative_units_at_group_end,
+          holding_period_days,
+          status,
+          ROW_NUMBER() OVER(PARTITION BY unique_ticker, ticker ORDER BY holding_period_group DESC) as rn_group_preference
+        FROM
+          `jy-investment-portfolio.Investment_Portfolio.holding period`
+      ) AS RankedByGroupPreference
+    WHERE
+      rn_group_preference = 1 -- Filter to keep only the latest group for each unique_ticker
+    QUALIFY ROW_NUMBER() OVER(PARTITION BY ticker ORDER BY holding_period_days DESC) = 1
+    -- Now, from the filtered results, apply rule #2:
+    -- "if there are multiple unique ticker with the same ticker, take the higher total days"
+  ),
+
+  ThisMonth AS (
+    SELECT
+      MAX(month_end) AS this_month
+    FROM `jy-investment-portfolio.Investment_Portfolio.monthly holdings data myr`
+  ),
+
+  -- Select all raw data for the latest month_end.
+  LatestRawData AS (
+    SELECT
+      mhd.account, 
+      mhd.ticker,
+      mhd.cumulative_cost_myr,
+      mhd.cumulative_units,
+      mhd.cost_per_unit, 
+      mhd.price,
+      mhd.unrealized_gain_loss_myr,
+      mhd.currency_gain_loss,
+      mhd.dividend,
+      mhd.realized_gain_loss,
+      mhd.market_value_myr
+    FROM
+      `jy-investment-portfolio.Investment_Portfolio.monthly holdings data myr` AS mhd
+      JOIN ThisMonth AS tm
+        ON mhd.month_end = tm.this_month
+  ),
+
+  LatestData AS (
+    SELECT
+      ticker,
+      SUM(cumulative_cost_myr) AS cumulative_cost_myr,
+      SUM(cumulative_units) AS cumulative_units,
+      CASE
+        WHEN SUM(cumulative_units) = 0 THEN 0.0 -- Handle division by zero if total units are 0
+        ELSE SUM(cumulative_units * cost_per_unit) / SUM(cumulative_units)
+        END AS cost_per_unit,
+      AVG(price) AS price,
+      SUM(unrealized_gain_loss_myr) AS unrealized_gain_loss_myr,
+      SUM(currency_gain_loss) AS currency_gain_loss,
+      SUM(dividend) AS dividend,
+      SUM(realized_gain_loss) AS realized_gain_loss,
+      SUM(market_value_myr) AS market_value_myr,
+      CASE 
+        WHEN SUM(cumulative_cost_myr+currency_gain_loss) = 0 THEN 0.0
+        ELSE SUM(unrealized_gain_loss_myr) / SUM(cumulative_cost_myr+currency_gain_loss) 
+        END AS unrealized_percent_fxn
+    FROM
+      LatestRawData
+    GROUP BY
+      ticker
+  )
+
+-- Final result: Directly select from the TickerHoldingPeriodSummary CTE
+SELECT
+  ld.ticker,
+  ld.cumulative_cost_myr,
+  ld.cumulative_units,
+  ld.cost_per_unit,
+  ld.price,
+  ld.unrealized_gain_loss_myr,
+  ld.currency_gain_loss,
+  ld.dividend,
+  ld.realized_gain_loss,
+  ld.market_value_myr,
+  ld.unrealized_percent_fxn,
+  hp.effective_first_purchase_date AS first_purchase_date,
+  hp.holding_period_days AS days_held,
+  hp.holding_period_days/365.25 AS years_held,
+  CASE
+    WHEN hp.holding_period_days <= 0 THEN 0.0
+    WHEN ld.unrealized_percent_fxn IS NULL THEN NULL
+    ELSE
+      (POW((1 + ld.unrealized_percent_fxn), (365.25/CAST(hp.holding_period_days AS FLOAT64))) - 1)
+  END AS cagr_percent
+FROM
+  HoldingPeriod hp
+JOIN 
+  LatestData ld
+ON hp.ticker = ld.ticker
+ORDER BY
+  ld.market_value_myr DESC, ld.realized_gain_loss DESC
