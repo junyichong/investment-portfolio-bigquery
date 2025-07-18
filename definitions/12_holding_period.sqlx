@@ -1,0 +1,111 @@
+config {
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "holding period",
+}
+
+WITH
+  -- Step 1: Identify the start of each new holding period
+  transaction_flags AS (
+    SELECT
+      unique_ticker,
+      ticker,
+      transaction_date,
+      transaction_type,
+      transacted_units,
+      cumulative_units,
+      previous_units,
+      transaction_id,
+
+      CASE
+        WHEN transaction_type = 'Buy' AND
+             (previous_units <= 0
+              OR ROW_NUMBER() OVER(PARTITION BY unique_ticker ORDER BY transaction_date ASC, transaction_id ASC) = 1
+             )
+        THEN 1
+        ELSE 0
+      END AS is_new_holding_period_start
+    FROM
+      `jy-investment-portfolio.Transaction_List.transaction list`
+  ),
+
+  -- Step 2: Assign a holding period group ID to each continuous ownership period
+  holding_period_groups AS (
+    SELECT
+      unique_ticker,
+      ticker,
+      transaction_date,
+      transaction_type,
+      cumulative_units,
+      transaction_id,
+      is_new_holding_period_start,
+      SUM(is_new_holding_period_start) OVER (
+        PARTITION BY unique_ticker
+        ORDER BY transaction_date ASC, transaction_id ASC
+      ) AS holding_period_group
+    FROM
+      transaction_flags
+  ),
+
+  -- Step 3: Find the effective "first buy date" for each holding period group
+  effective_first_purchase_dates AS (
+    SELECT
+      unique_ticker,
+      ticker,
+      holding_period_group,
+      MIN(transaction_date) AS effective_first_purchase_date
+    FROM
+      holding_period_groups
+    WHERE
+      transaction_type = 'Buy'
+    GROUP BY
+      unique_ticker,
+      ticker,
+      holding_period_group
+  ),
+
+  -- Step 4: Determine the end details for each holding period group
+  holding_period_end_details AS (
+    SELECT
+      unique_ticker,
+      ticker,
+      holding_period_group,
+      MAX(transaction_date) AS last_transaction_date_in_group,
+      ANY_VALUE(cumulative_units HAVING MAX(transaction_id)) AS cumulative_units_at_group_end
+    FROM
+      holding_period_groups
+    GROUP BY
+      unique_ticker,
+      ticker,
+      holding_period_group
+  )
+
+-- Step 5: Combine results and calculate holding periods for each group
+SELECT
+  efpd.unique_ticker,
+  efpd.ticker,
+  efpd.holding_period_group,
+  efpd.effective_first_purchase_date,
+  hped.last_transaction_date_in_group,
+  hped.cumulative_units_at_group_end,
+  DATE_DIFF(
+    CASE
+      WHEN hped.cumulative_units_at_group_end > 0 THEN CURRENT_DATE()
+      ELSE hped.last_transaction_date_in_group
+    END,
+    efpd.effective_first_purchase_date,
+    DAY
+  ) AS holding_period_days,
+  CASE
+    WHEN hped.cumulative_units_at_group_end > 0 THEN 'Currently Held'
+    ELSE 'Sold Out'
+  END AS status
+FROM
+  effective_first_purchase_dates AS efpd
+  JOIN holding_period_end_details AS hped
+    ON efpd.unique_ticker = hped.unique_ticker
+    AND efpd.ticker = hped.ticker
+    AND efpd.holding_period_group = hped.holding_period_group
+ORDER BY
+  efpd.unique_ticker,
+  efpd.holding_period_group
