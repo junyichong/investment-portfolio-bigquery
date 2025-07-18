@@ -10,6 +10,7 @@ SELECT
     account,
     ticker,
     cumulative_cost_myr,
+    cumulative_units,
     cost_per_unit,
     price,
 
