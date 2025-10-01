@@ -9,7 +9,7 @@ SELECT
     PARSE_DATE('%Y%m%d', REPLACE(month_end, '_', '')) AS month_end,
     price
 FROM 
-    `jy-investment-portfolio.Transaction_List.price history`
+    `jy-investment-portfolio.Transaction_List.price history 10 years`
 UNPIVOT(
     price FOR month_end IN (_20200930, _20201031, _20201130, 
     _20201231, _20210131, _20210228, _20210331, _20210430, _20210531, 
