@@ -22,7 +22,7 @@ WITH monthly_myr AS (
         ORDER BY month_end
     ), 0), 0) AS unrealized_gain_loss_this_month,
 
-    currency_gain_loss_myr,
+    currency_gain_loss_myr AS currency_gain_loss,
     -- Monthly Currency Gain/Loss Sum by Account
     IFNULL(currency_gain_loss_myr - IFNULL(LAG(currency_gain_loss_myr) OVER (
         PARTITION BY unique_ticker
@@ -65,7 +65,7 @@ monthly_usd AS (
         ORDER BY month_end
     ), 0), 0) AS unrealized_gain_loss_this_month,
 
-    currency_gain_loss_usd, -- Using the dedicated USD currency gain/loss column
+    currency_gain_loss_usd AS currency_gain_loss, -- Using the dedicated USD currency gain/loss column
     -- Monthly Currency Gain/Loss Sum by Account
     IFNULL(currency_gain_loss_usd - IFNULL(LAG(currency_gain_loss_usd) OVER (
         PARTITION BY unique_ticker

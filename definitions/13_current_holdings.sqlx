@@ -50,60 +50,63 @@ WITH
   -- Select all raw data for the latest month_end.
   LatestRawData AS (
     SELECT
+      mhd.base_currency,
       mhd.account, 
       mhd.ticker,
-      mhd.cumulative_cost_myr,
+      mhd.cumulative_cost,
       mhd.cumulative_units,
       mhd.cost_per_unit, 
       mhd.price,
-      mhd.unrealized_gain_loss_myr,
+      mhd.unrealized_gain_loss,
       mhd.currency_gain_loss,
       mhd.dividend,
       mhd.realized_gain_loss,
-      mhd.market_value_myr
+      mhd.market_value
     FROM
-      `jy-investment-portfolio.Investment_Portfolio.monthly holdings data myr` AS mhd
+      `jy-investment-portfolio.Investment_Portfolio.monthly holdings data` AS mhd
       JOIN ThisMonth AS tm
         ON mhd.month_end = tm.this_month
   ),
 
   LatestData AS (
     SELECT
+      base_currency,
       ticker,
-      SUM(cumulative_cost_myr) AS cumulative_cost_myr,
+      SUM(cumulative_cost) AS cumulative_cost,
       SUM(cumulative_units) AS cumulative_units,
       CASE
         WHEN SUM(cumulative_units) = 0 THEN 0.0 -- Handle division by zero if total units are 0
         ELSE SUM(cumulative_units * cost_per_unit) / SUM(cumulative_units)
         END AS cost_per_unit,
       AVG(price) AS price,
-      SUM(unrealized_gain_loss_myr) AS unrealized_gain_loss_myr,
+      SUM(unrealized_gain_loss) AS unrealized_gain_loss,
       SUM(currency_gain_loss) AS currency_gain_loss,
       SUM(dividend) AS dividend,
       SUM(realized_gain_loss) AS realized_gain_loss,
-      SUM(market_value_myr) AS market_value_myr,
+      SUM(market_value) AS market_value,
       CASE 
-        WHEN SUM(cumulative_cost_myr+currency_gain_loss) = 0 THEN 0.0
-        ELSE SUM(unrealized_gain_loss_myr) / SUM(cumulative_cost_myr+currency_gain_loss) 
+        WHEN SUM(cumulative_cost+currency_gain_loss) = 0 THEN 0.0
+        ELSE SUM(unrealized_gain_loss) / SUM(cumulative_cost+currency_gain_loss) 
         END AS unrealized_percent_fxn
     FROM
       LatestRawData
     GROUP BY
-      ticker
+      base_currency, ticker
   )
 
 -- Final result: Directly select from the TickerHoldingPeriodSummary CTE
 SELECT
+  ld.base_currency,
   ld.ticker,
-  ld.cumulative_cost_myr,
+  ld.cumulative_cost,
   ld.cumulative_units,
   ld.cost_per_unit,
   ld.price,
-  ld.unrealized_gain_loss_myr,
+  ld.unrealized_gain_loss,
   ld.currency_gain_loss,
   ld.dividend,
   ld.realized_gain_loss,
-  ld.market_value_myr,
+  ld.market_value,
   ld.unrealized_percent_fxn,
   hp.effective_first_purchase_date AS first_purchase_date,
   hp.holding_period_days AS days_held,
@@ -119,5 +122,6 @@ FROM
 LEFT JOIN 
   HoldingPeriod hp
 ON ld.ticker = hp.ticker
+
 ORDER BY
-  ld.market_value_myr DESC, ld.realized_gain_loss DESC
+  ld.base_currency, ld.market_value DESC, ld.realized_gain_loss DESC
