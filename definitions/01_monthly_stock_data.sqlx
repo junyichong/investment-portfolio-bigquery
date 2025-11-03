@@ -161,7 +161,7 @@ SELECT
 
   ldm.cumulative_cost AS cumulative_cost_myr,
   myr.price * (ph.price * ld.cumulative_units - ld.cumulative_cost) AS unrealized_gain_loss_myr,
-  (myr.price * ld.cumulative_cost) - ldm.cumulative_cost AS currency_gain_loss,
+  (myr.price * ld.cumulative_cost) - ldm.cumulative_cost AS currency_gain_loss_myr,
   COALESCE(ddm.cumulative_dividend, 0) AS cumulative_dividend_myr,
   COALESCE(glm.cumulative_gain_loss, 0) AS cumulative_gain_loss_myr,
   myr.price * ph.price * ld.cumulative_units  AS market_value_myr,

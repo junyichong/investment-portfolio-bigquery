@@ -2,7 +2,7 @@ config {
   type: "table",
   schema: "Investment_Portfolio",
   name: "current holdings",
-  dependencies: ["holding period", "monthly holdings data myr"]
+  dependencies: ["holding period", "monthly holdings data"]
 }
 
 WITH
@@ -44,7 +44,7 @@ WITH
   ThisMonth AS (
     SELECT
       MAX(month_end) AS this_month
-    FROM `jy-investment-portfolio.Investment_Portfolio.monthly holdings data myr`
+    FROM `jy-investment-portfolio.Investment_Portfolio.monthly holdings data`
   ),
 
   -- Select all raw data for the latest month_end.

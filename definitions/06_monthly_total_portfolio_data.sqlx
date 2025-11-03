@@ -12,6 +12,7 @@ WITH months AS (
 ),
 monthly_data AS (
   SELECT 
+    base_currency,
     month_end,
     EXTRACT(YEAR FROM month_end) AS year,
     SUM(amount_invested) AS amount_invested,
@@ -29,46 +30,66 @@ monthly_data AS (
   FROM 
     `jy-investment-portfolio.Investment_Portfolio.monthly portfolio data`
   GROUP BY 
-    month_end
+    base_currency, month_end
   ORDER BY 
-    month_end
+    base_currency, month_end
 ),
 annual_data AS (
-  SELECT
-    year,
-    MAX(CASE WHEN row_num = 1 THEN total_invested END) AS annual_total_invested,
-    MAX(CASE WHEN row_num = 1 THEN total_gain_loss END) AS annual_total_gain_loss,
-    MAX(CASE WHEN row_num = 1 THEN market_value END) AS annual_market_value
-  FROM monthly_data
-  GROUP BY 
-    year
-  ORDER BY 
-    year
+  SELECT
+    base_currency, 
+    year,
+    -- Use LAST_VALUE to grab the final value for the year's total invested
+    LAST_VALUE(total_invested IGNORE NULLS) 
+        OVER (
+        PARTITION BY base_currency, year 
+        ORDER BY month_end 
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS annual_total_invested,
+
+    -- Use LAST_VALUE to grab the final value for the year's total gain/loss
+    LAST_VALUE(total_gain_loss IGNORE NULLS) 
+        OVER (
+        PARTITION BY base_currency, year 
+        ORDER BY month_end 
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS annual_total_gain_loss,
+  
+  	-- Use LAST_VALUE to grab the final value for the year's market value
+    LAST_VALUE(market_value IGNORE NULLS) 
+        OVER (
+        PARTITION BY base_currency, year 
+        ORDER BY month_end 
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS annual_market_value,
+  
+  	-- We only need one row per year/currency, so we keep the rank for filtering
+  	ROW_NUMBER() OVER (PARTITION BY base_currency, year ORDER BY month_end DESC) as rank_per_year
+  FROM monthly_data
 ),
 monthly_return AS (
   SELECT
+    base_currency,
     month_end,
     EXTRACT(YEAR FROM month_end) AS year,
     IF(cost_this_month = 0, 0, gain_loss_this_month / cost_this_month) AS gain_loss_this_month_percent,
     IF(cost_this_month = 0, 0, (gain_loss_this_month-currency_gain_loss) / cost_this_month) AS gain_loss_this_month_percent_fxn
   FROM
     monthly_data
-  ORDER BY month_end
+  ORDER BY base_currency, month_end
 ),
 annual_return AS (
   SELECT 
+    base_currency,
     year,
      EXP(SUM(LOG(1 + gain_loss_this_month_percent))) - 1 AS annual_return_percent,
      EXP(SUM(LOG(1 + gain_loss_this_month_percent_fxn))) - 1 AS annual_return_percent_fxn
   FROM 
     monthly_return
   GROUP BY 
-    year
+    base_currency, year
   ORDER BY 
-    year
+    base_currency, year
 )
 
 SELECT
+  md.base_currency,
   mr.year,
   md.month_end,
   md.amount_invested,
@@ -92,9 +113,13 @@ SELECT
 FROM monthly_data md
 
 LEFT JOIN monthly_return mr
-  ON md.month_end = mr.month_end
-LEFT JOIN annual_data ad
-  ON mr.year = ad.year
+  ON md.month_end = mr.month_end
+  AND md.base_currency = mr.base_currency 
+-- JOIN annual_data is now LEFT JOIN with filtering on rank_per_year
+LEFT JOIN (SELECT * FROM annual_data WHERE rank_per_year = 1) ad 
+  ON mr.year = ad.year
+  AND mr.base_currency = ad.base_currency 
 LEFT JOIN annual_return ar
-  ON mr.year = ar.year
-ORDER BY md.month_end
+  ON mr.year = ar.year
+  AND mr.base_currency = ar.base_currency 
+ORDER BY md.base_currency, md.month_end

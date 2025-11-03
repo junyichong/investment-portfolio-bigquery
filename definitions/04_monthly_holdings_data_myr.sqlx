@@ -1,28 +1,30 @@
 config {
   type: "table",
   schema: "Investment_Portfolio",
-  name: "monthly holdings data myr",
+  name: "monthly holdings data",
   dependencies: ["monthly cumulative data"]
 }
 
-SELECT
+WITH monthly_myr AS (
+  SELECT
+    "MYR" AS base_currency,
     month_end,
     account,
     ticker,
-    cumulative_cost_myr,
+    cumulative_cost_myr AS cumulative_cost,
     cumulative_units,
     cost_per_unit,
     price,
+    unrealized_gain_loss_myr AS unrealized_gain_loss,
 
-    unrealized_gain_loss_myr,
     IFNULL(unrealized_gain_loss_myr - IFNULL(LAG(unrealized_gain_loss_myr) OVER (
         PARTITION BY unique_ticker
         ORDER BY month_end
     ), 0), 0) AS unrealized_gain_loss_this_month,
 
-    currency_gain_loss,
+    currency_gain_loss_myr,
     -- Monthly Currency Gain/Loss Sum by Account
-    IFNULL(currency_gain_loss - IFNULL(LAG(currency_gain_loss) OVER (
+    IFNULL(currency_gain_loss_myr - IFNULL(LAG(currency_gain_loss_myr) OVER (
         PARTITION BY unique_ticker
         ORDER BY month_end
     ),0), 0) AS currency_gain_loss_this_month,
@@ -41,9 +43,58 @@ SELECT
         ORDER BY month_end
     ), 0), 0) AS realized_gain_loss_this_month,
 
-    market_value_myr
+    market_value_myr AS market_value
     FROM
     `jy-investment-portfolio.Investment_Portfolio.monthly cumulative data`
+),
 
-    -- WHERE ticker = "BABA"
-    ORDER BY month_end ASC, account, ticker
+monthly_usd AS (
+  SELECT
+    "USD" AS base_currency,
+    month_end,
+    account,
+    ticker,
+    cumulative_cost_usd AS cumulative_cost,
+    cumulative_units,
+    cost_per_unit, 
+    price,
+    unrealized_gain_loss_usd AS unrealized_gain_loss,
+
+    IFNULL(unrealized_gain_loss_usd - IFNULL(LAG(unrealized_gain_loss_usd) OVER (
+        PARTITION BY unique_ticker
+        ORDER BY month_end
+    ), 0), 0) AS unrealized_gain_loss_this_month,
+
+    currency_gain_loss_usd, -- Using the dedicated USD currency gain/loss column
+    -- Monthly Currency Gain/Loss Sum by Account
+    IFNULL(currency_gain_loss_usd - IFNULL(LAG(currency_gain_loss_usd) OVER (
+        PARTITION BY unique_ticker
+        ORDER BY month_end
+    ),0), 0) AS currency_gain_loss_this_month,
+
+    cumulative_dividend_usd AS dividend,
+    -- Monthly Dividend Sum by Account
+    IFNULL(cumulative_dividend_usd - IFNULL(LAG(cumulative_dividend_usd) OVER (
+        PARTITION BY unique_ticker
+        ORDER BY month_end
+    ), 0), 0) AS dividend_this_month,
+
+    cumulative_gain_loss_usd AS realized_gain_loss,
+    -- Monthly Gain/Loss Sum by Account
+    IFNULL(cumulative_gain_loss_usd - IFNULL(LAG(cumulative_gain_loss_usd) OVER (
+    PARTITION BY unique_ticker
+    ORDER BY month_end
+    ), 0), 0) AS realized_gain_loss_this_month,
+
+    market_value_usd AS market_value
+  FROM
+  `jy-investment-portfolio.Investment_Portfolio.monthly cumulative data`
+)
+
+SELECT * FROM monthly_myr
+UNION ALL
+SELECT * FROM monthly_usd
+
+ORDER BY 
+    month_end ASC, account, ticker, base_currency
+
