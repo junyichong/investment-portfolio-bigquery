@@ -10,6 +10,9 @@ WITH months AS (
     DISTINCT(month_end) AS month_end
   FROM `jy-investment-portfolio.Investment_Portfolio.price history`
 ),
+
+-- data in original currency --
+
 latest_data AS (
   SELECT
     t.account, t.currency, t.ticker, t.unique_ticker, t.cumulative_units, t.cumulative_cost,
@@ -43,9 +46,11 @@ gain_loss_data AS (
     ON t.transaction_date <= m.month_end
   GROUP BY m.month_end, t.unique_ticker
 ),
+
+-- data in myr --
 latest_data_myr AS (
   SELECT
-    t.unique_ticker, t.cumulative_cost,
+    t.currency, t.unique_ticker, t.cumulative_cost,
     m.month_end,
     ROW_NUMBER() OVER (PARTITION BY m.month_end, t.unique_ticker ORDER BY t.transaction_id DESC) AS row_num
   FROM `jy-investment-portfolio.Transaction_List.transaction list myr` t
@@ -75,6 +80,46 @@ gain_loss_data_myr AS (
     ON t.transaction_date <= m.month_end
   GROUP BY m.month_end, t.unique_ticker
 ),
+
+-- data in usd --
+latest_data_usd AS (
+  SELECT
+    CONCAT(t.currency, 'USD') AS currency_to_usd, 
+    t.unique_ticker, 
+    t.cumulative_cost,
+    m.month_end,
+    ROW_NUMBER() OVER (PARTITION BY m.month_end, t.unique_ticker ORDER BY t.transaction_id DESC) AS row_num
+  FROM `jy-investment-portfolio.Transaction_List.transaction list usd` t
+  JOIN months m
+    ON t.transaction_date <= m.month_end
+  WHERE t.ticker NOT IN ("USD", "MYR", "HKD")
+),
+dividend_data_usd AS (
+  SELECT 
+    m.month_end,
+    t.unique_ticker,
+    SUM(CASE WHEN t.transaction_type = 'Dividend' THEN t.gain_loss ELSE 0 END) AS cumulative_dividend_usd
+  FROM `jy-investment-portfolio.Transaction_List.transaction list usd` t
+  JOIN months m
+    ON t.transaction_date <= m.month_end
+  GROUP BY m.month_end, t.unique_ticker
+),
+gain_loss_data_usd AS (
+  SELECT 
+    m.month_end,
+    t.unique_ticker,
+    SUM(CASE 
+          WHEN t.transaction_type IN ('Sell', 'Fee') THEN t.gain_loss 
+          ELSE 0 
+        END) AS cumulative_gain_loss_usd
+  FROM `jy-investment-portfolio.Transaction_List.transaction list usd` t
+  JOIN months m
+    ON t.transaction_date <= m.month_end
+  GROUP BY m.month_end, t.unique_ticker
+),
+
+
+
 price_history AS (
   SELECT 
     ticker,
@@ -89,6 +134,14 @@ to_myr AS (
     price
   FROM `jy-investment-portfolio.Investment_Portfolio.price history`
   WHERE ticker IN ("USD", "HKD", "MYR")
+),
+to_usd AS (
+  SELECT 
+    ticker,
+    month_end,
+    price
+  FROM `jy-investment-portfolio.Investment_Portfolio.price history`
+  WHERE ticker IN ("USDUSD", "HKDUSD", "MYRUSD")
 )
 
 SELECT 
@@ -98,6 +151,7 @@ SELECT
   ld.unique_ticker,
   ph.price,
   ld.cumulative_units, 
+
   ld.cumulative_cost,
   IF(ld.cumulative_units IS NULL OR ld.cumulative_units=0, 0, ld.cumulative_cost / ld.cumulative_units) AS cost_per_unit,
   ph.price * ld.cumulative_units - ld.cumulative_cost AS unrealized_gain_loss,
@@ -110,30 +164,55 @@ SELECT
   (myr.price * ld.cumulative_cost) - ldm.cumulative_cost AS currency_gain_loss,
   COALESCE(ddm.cumulative_dividend, 0) AS cumulative_dividend_myr,
   COALESCE(glm.cumulative_gain_loss, 0) AS cumulative_gain_loss_myr,
-  myr.price * ph.price * ld.cumulative_units  AS market_value_myr
+  myr.price * ph.price * ld.cumulative_units  AS market_value_myr,
+
+  -- ldu.currency_to_usd,
+  -- usd.price AS usd_price,
+  ldu.cumulative_cost AS cumulative_cost_usd,
+  usd.price * (ph.price * ld.cumulative_units - ld.cumulative_cost) AS unrealized_gain_loss_usd,
+  (usd.price * ld.cumulative_cost) - ldu.cumulative_cost AS currency_gain_loss_usd,
+  COALESCE(ddu.cumulative_dividend_usd, 0) AS cumulative_dividend_usd,
+  COALESCE(glu.cumulative_gain_loss_usd, 0) AS cumulative_gain_loss_usd,
+  usd.price * ph.price * ld.cumulative_units  AS market_value_usd,
+
 FROM latest_data ld
 
-LEFT JOIN latest_data_myr ldm 
-  ON ld.unique_ticker = ldm.unique_ticker 
-  AND ld.month_end = ldm.month_end
 LEFT JOIN dividend_data dd 
   ON ld.unique_ticker = dd.unique_ticker 
   AND ld.month_end = dd.month_end
 LEFT JOIN gain_loss_data gl 
   ON ld.unique_ticker = gl.unique_ticker 
   AND ld.month_end = gl.month_end
+
+LEFT JOIN latest_data_myr ldm 
+  ON ld.unique_ticker = ldm.unique_ticker 
+  AND ld.month_end = ldm.month_end
 LEFT JOIN dividend_data_myr ddm 
   ON ld.unique_ticker = ddm.unique_ticker 
   AND ld.month_end = ddm.month_end
 LEFT JOIN gain_loss_data_myr glm 
   ON ld.unique_ticker = glm.unique_ticker 
   AND ld.month_end = glm.month_end
+
+LEFT JOIN latest_data_usd ldu 
+  ON ld.unique_ticker = ldu.unique_ticker 
+  AND ld.month_end = ldu.month_end
+LEFT JOIN dividend_data_usd ddu
+  ON ld.unique_ticker = ddu.unique_ticker 
+  AND ld.month_end = ddu.month_end
+LEFT JOIN gain_loss_data_usd glu
+  ON ld.unique_ticker = glu.unique_ticker 
+  AND ld.month_end = glu.month_end
+
 LEFT JOIN price_history ph
   ON ld.ticker = ph.ticker 
   AND ld.month_end = ph.month_end
 LEFT JOIN to_myr myr
   ON ld.month_end = myr.month_end
-  AND ld.currency = myr.ticker
+  AND ldm.currency = myr.ticker
+LEFT JOIN to_usd usd
+  ON ld.month_end = usd.month_end
+  AND ldu.currency_to_usd = usd.ticker
 
-WHERE ld.row_num = 1 AND ldm.row_num =1 -- AND ld.account = "Ledger" # AND ld.unique_ticker IN ("IBKR: BABA", "Webull: BABA")
+WHERE ld.row_num = 1 AND ldm.row_num =1 AND ldu.row_num = 1
 ORDER BY ld.month_end ASC, ld.unique_ticker
