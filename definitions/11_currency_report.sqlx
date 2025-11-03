@@ -15,7 +15,7 @@ FROM `jy-investment-portfolio.Investment_Portfolio.price history` ph
 JOIN `jy-investment-portfolio.Investment_Portfolio.monthly total portfolio data` pd
 ON ph.month_end = pd.month_end
 
-WHERE ph.ticker = "USD"
+WHERE pd.base_currency = "MYR" AND ph.ticker = "USD"
 
 
 
