@@ -1,62 +1,65 @@
 config {
-  type: "table",
-  schema: "Investment_Portfolio",
-  name: "spy annual",
-  dependencies: ["spy monthly"]
+  type: "table",
+  schema: "Investment_Portfolio",
+  name: "spy annual",
+  dependencies: ["spy monthly"]
 }
 
-WITH months AS (
-  SELECT 
-    DISTINCT(month_end) AS month_end
-  FROM `jy-investment-portfolio.Investment_Portfolio.price history`
+WITH monthly_data AS (
+  SELECT 
+    base_currency, 
+    month_end,
+    EXTRACT(YEAR FROM month_end) AS year,
+    cumulative_cost,
+    unrealized_gain_loss,
+    market_value,
+    gain_loss_this_month_percent,
+    ROW_NUMBER() OVER (PARTITION BY base_currency, EXTRACT(YEAR FROM month_end) ORDER BY month_end DESC) AS row_num
+  FROM 
+    `jy-investment-portfolio.Investment_Portfolio.spy monthly`
 ),
-monthly_data AS (
-  SELECT 
-    month_end,
-    EXTRACT(YEAR FROM month_end) AS year,
-    cumulative_cost,
-    unrealized_gain_loss,
-    market_value,
-    gain_loss_this_month_percent,
-    ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM month_end) ORDER BY month_end DESC) AS row_num
-  FROM 
-    `jy-investment-portfolio.Investment_Portfolio.spy monthly`
-),
+
 annual_data AS (
-  SELECT
-    year,
-    MAX(CASE WHEN row_num = 1 THEN unrealized_gain_loss END) AS annual_total_gain_loss,
-    MAX(CASE WHEN row_num = 1 THEN market_value END) AS annual_market_value
-  FROM monthly_data
-  GROUP BY 
-    year
-  ORDER BY 
-    year
+  SELECT
+    base_currency, 
+    year,
+    MAX(CASE WHEN row_num = 1 THEN unrealized_gain_loss END) AS annual_total_gain_loss,
+    MAX(CASE WHEN row_num = 1 THEN market_value END) AS annual_market_value
+  FROM monthly_data
+  GROUP BY 
+    base_currency, year 
+  ORDER BY 
+    base_currency, year
 ),
+
 annual_return AS (
-  SELECT 
-    year,
-    EXP(SUM(LOG(1 + gain_loss_this_month_percent))) - 1 AS annual_return_percent,
-  FROM 
-    monthly_data
-  GROUP BY 
-    year
-  ORDER BY 
-    year
+  SELECT 
+    base_currency, 
+    year,
+  	EXP(SUM(LOG(1 + gain_loss_this_month_percent))) - 1 AS annual_return_percent
+  FROM 
+  	monthly_data
+  GROUP BY 
+  	base_currency, year 
+  ORDER BY 
+  	base_currency, year
 )
 
 SELECT
-  md.year,
-  md.month_end,
-  md.market_value,
-  md.gain_loss_this_month_percent,
-  ar.annual_return_percent,
-  ad.annual_total_gain_loss,
-  ad.annual_market_value
+  md.base_currency, 
+  md.year,
+  md.month_end,
+  md.market_value,
+  md.gain_loss_this_month_percent,
+  ar.annual_return_percent,
+  ad.annual_total_gain_loss,
+  ad.annual_market_value
 FROM monthly_data md
 
 LEFT JOIN annual_data ad
-  ON md.year = ad.year
+  ON md.year = ad.year
+  AND md.base_currency = ad.base_currency 
 LEFT JOIN annual_return ar
-  ON md.year = ar.year
-ORDER BY md.month_end
+  ON md.year = ar.year
+  AND md.base_currency = ar.base_currency
+ORDER BY md.base_currency, md.month_end

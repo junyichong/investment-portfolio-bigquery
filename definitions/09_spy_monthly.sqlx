@@ -10,96 +10,162 @@ WITH months AS (
     DISTINCT(month_end) AS month_end
   FROM `jy-investment-portfolio.Investment_Portfolio.price history`
 ),
-spy_data AS (
-  SELECT
-    t.ticker, t.cumulative_units, t.cumulative_cost,
-    m.month_end,
-    ROW_NUMBER() OVER (PARTITION BY m.month_end ORDER BY t.transaction_id DESC) AS row_num
-  FROM `jy-investment-portfolio.Transaction_List.spy` t
-  JOIN months m
-        ON t.transaction_date <= m.month_end
+
+--- 1. MYR Conversion Data (Original 'spy' table, converted to MYR) ---
+
+spy_data_myr AS (
+  SELECT
+    t.ticker, t.cumulative_units, t.cumulative_cost,
+    m.month_end,
+    ROW_NUMBER() OVER (PARTITION BY m.month_end ORDER BY t.transaction_id DESC) AS row_num
+  FROM `jy-investment-portfolio.Transaction_List.spy` t
+  JOIN months m
+        ON t.transaction_date <= m.month_end
 ),
-gain_loss_data AS (
-  SELECT 
-    m.month_end,
-    SUM(t.gain_loss) AS cumulative_gain_loss
-  FROM `jy-investment-portfolio.Transaction_List.spy` t
-  JOIN months m
-    ON t.transaction_date <= m.month_end
-  GROUP BY m.month_end
+gain_loss_data_myr AS (
+  SELECT 
+    m.month_end,
+    SUM(t.gain_loss) AS cumulative_gain_loss
+  FROM `jy-investment-portfolio.Transaction_List.spy` t
+  JOIN months m
+    ON t.transaction_date <= m.month_end
+  GROUP BY m.month_end
 ),
+
+--- 2. USD Data (New 'SPY USD' table, base currency USD) ---
+
+spy_data_usd AS (
+  SELECT
+    t.ticker, t.cumulative_units, t.cumulative_cost,
+    m.month_end,
+    ROW_NUMBER() OVER (PARTITION BY m.month_end ORDER BY t.transaction_id DESC) AS row_num
+  FROM `jy-investment-portfolio.Transaction_List.spy usd` t 
+  JOIN months m
+        ON t.transaction_date <= m.month_end
+),
+gain_loss_data_usd AS (
+  SELECT 
+    m.month_end,
+    SUM(t.gain_loss) AS cumulative_gain_loss
+  FROM `jy-investment-portfolio.Transaction_List.spy usd` t 
+  JOIN months m
+    ON t.transaction_date <= m.month_end
+  GROUP BY m.month_end
+),
+
+--- 3. Common Lookup CTEs ---
+
 price_history AS (
-  SELECT 
-    ticker,
-    month_end,
-    price
-  FROM `jy-investment-portfolio.Investment_Portfolio.price history`
-  WHERE ticker IN ("SPY", "QQQ", "CSPX")
+  SELECT 
+    ticker,
+    month_end,
+    price
+  FROM `jy-investment-portfolio.Investment_Portfolio.price history`
+  WHERE ticker IN ("SPY", "QQQ", "CSPX")
 ),
 to_myr AS (
-  SELECT 
-    ticker,
-    month_end,
-    price
-  FROM `jy-investment-portfolio.Investment_Portfolio.price history`
-  WHERE ticker IN ("USD")
+  SELECT 
+    ticker,
+    month_end,
+    price
+  FROM `jy-investment-portfolio.Investment_Portfolio.price history`
+  WHERE ticker IN ("USD")
 ),
-spy_cumulative_data AS (
-  SELECT 
-    spy.month_end,
-    spy.ticker,
-    ph.price,
-    myr.price AS to_myr,
-    spy.cumulative_units, 
-    spy.cumulative_cost,
-    IF(spy.cumulative_units IS NULL OR spy.cumulative_units=0, 0, spy.cumulative_cost / spy.cumulative_units) AS cost_per_unit,
-    ph.price * myr.price * spy.cumulative_units - spy.cumulative_cost AS unrealized_gain_loss,
-    COALESCE(gl.cumulative_gain_loss, 0) AS cumulative_gain_loss,
-    ph.price * myr.price * spy.cumulative_units AS market_value,
-  FROM spy_data spy
 
-  LEFT JOIN gain_loss_data gl 
-    ON spy.month_end = gl.month_end
-  LEFT JOIN price_history ph
-    ON spy.ticker = ph.ticker 
-    AND spy.month_end = ph.month_end
-  LEFT JOIN to_myr myr
-    ON spy.month_end = myr.month_end
+--- 4. Cumulative Data Calculation (Separate for each base currency) ---
 
-  WHERE spy.row_num = 1 
-  ORDER BY spy.month_end ASC
+spy_cumulative_myr AS (
+  SELECT 
+    "MYR" AS base_currency,
+    spy.month_end,
+    spy.ticker,
+    ph.price,
+    myr.price AS fx_rate, 
+    spy.cumulative_units, 
+    spy.cumulative_cost,
+    IF(spy.cumulative_units = 0, 0, spy.cumulative_cost / spy.cumulative_units) AS cost_per_unit,
+    ph.price * myr.price * spy.cumulative_units - spy.cumulative_cost AS unrealized_gain_loss,
+    COALESCE(gl.cumulative_gain_loss, 0) AS cumulative_gain_loss,
+    ph.price * myr.price * spy.cumulative_units AS market_value
+  FROM spy_data_myr spy
+
+  LEFT JOIN gain_loss_data_myr gl 
+    ON spy.month_end = gl.month_end
+  LEFT JOIN price_history ph
+    ON spy.ticker = ph.ticker 
+    AND spy.month_end = ph.month_end
+  LEFT JOIN to_myr myr
+    ON spy.month_end = myr.month_end
+  WHERE spy.row_num = 1 
 ),
+
+spy_cumulative_usd AS (
+  SELECT 
+    "USD" AS base_currency,
+    spy.month_end,
+    spy.ticker,
+    ph.price,
+    1.0 AS fx_rate, 
+    spy.cumulative_units, 
+    spy.cumulative_cost,
+    IF(spy.cumulative_units = 0, 0, spy.cumulative_cost / spy.cumulative_units) AS cost_per_unit,
+    ph.price * spy.cumulative_units - spy.cumulative_cost AS unrealized_gain_loss, 
+    COALESCE(gl.cumulative_gain_loss, 0) AS cumulative_gain_loss,
+    ph.price * spy.cumulative_units AS market_value 
+  FROM spy_data_usd spy
+
+  LEFT JOIN gain_loss_data_usd gl 
+    ON spy.month_end = gl.month_end
+  LEFT JOIN price_history ph
+    ON spy.ticker = ph.ticker 
+    AND spy.month_end = ph.month_end
+  WHERE spy.row_num = 1 
+),
+
+--- 5. Combine Cumulative Data for Month-over-Month (MoM) Analysis ---
+
+spy_cumulative_combined AS (
+    SELECT * FROM spy_cumulative_myr
+    UNION ALL
+    SELECT * FROM spy_cumulative_usd
+),
+
 main AS (
-  SELECT
-    month_end,
-    ticker,
-    cumulative_cost,
-    IFNULL(cumulative_cost - IFNULL(LAG(cumulative_cost) OVER (
-        ORDER BY month_end
-    ), 0), 0) + IFNULL(LAG(market_value) OVER (
-        ORDER BY month_end
-    ), 0) AS cost_this_month,
-    
-    cost_per_unit,
-    price,
-    unrealized_gain_loss,
-    IFNULL(unrealized_gain_loss - IFNULL(LAG(unrealized_gain_loss) OVER (
-        ORDER BY month_end
-    ), 0), 0) AS unrealized_gain_loss_this_month,
-    
-    cumulative_gain_loss AS realized_gain_loss,
-    IFNULL(cumulative_gain_loss - IFNULL(LAG(cumulative_gain_loss) OVER (
-        ORDER BY month_end
-    ), 0), 0) AS realized_gain_loss_this_month,
+  SELECT
+    base_currency, 
+    month_end,
+    ticker,
+    cumulative_cost,
+    IFNULL(cumulative_cost - IFNULL(LAG(cumulative_cost) OVER (
+        PARTITION BY base_currency, ticker 
+        ORDER BY month_end
+    ), 0), 0) + IFNULL(LAG(market_value) OVER (
+        PARTITION BY base_currency, ticker 
+        ORDER BY month_end
+    ), 0) AS cost_this_month,
+    
+    cost_per_unit,
+    price,
+    unrealized_gain_loss,
+    IFNULL(unrealized_gain_loss - IFNULL(LAG(unrealized_gain_loss) OVER (
+        PARTITION BY base_currency, ticker
+        ORDER BY month_end
+    ), 0), 0) AS unrealized_gain_loss_this_month,
+    
+    cumulative_gain_loss AS realized_gain_loss,
+    IFNULL(cumulative_gain_loss - IFNULL(LAG(cumulative_gain_loss) OVER (
+        PARTITION BY base_currency, ticker 
+        ORDER BY month_end
+    ), 0), 0) AS realized_gain_loss_this_month,
 
-    market_value,
-    cumulative_gain_loss + market_value AS total_value
-    FROM
-    spy_cumulative_data
-    ORDER BY month_end ASC
+    market_value,
+    cumulative_gain_loss + market_value AS total_value
+    FROM
+    spy_cumulative_combined
+    ORDER BY base_currency, month_end ASC
 )
 
 SELECT *,
-  IF(cost_this_month = 0, 0, (unrealized_gain_loss_this_month + realized_gain_loss_this_month) / cost_this_month) AS gain_loss_this_month_percent,
+  IF(cost_this_month = 0, 0, (unrealized_gain_loss_this_month + realized_gain_loss_this_month) / cost_this_month) AS gain_loss_this_month_percent
 FROM main m
-ORDER BY month_end
+ORDER BY base_currency, month_end
